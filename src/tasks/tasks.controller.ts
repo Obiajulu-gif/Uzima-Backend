@@ -1,38 +1,91 @@
 import {
   Controller,
   Get,
-  Req,
-  UnauthorizedException,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
   UseGuards,
+  Request,
+  Query,
 } from '@nestjs/common';
-import { Request } from 'express';
+import { TasksService } from './tasks.service';
+import { CreateTaskDto } from './dto/create-task.dto';
+import { UpdateTaskDto } from './dto/update-task.dto';
+import { ListTasksDto } from './dto/list-tasks.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { HealthTask } from './entities/daily-task-assignment.entity';
-import { TaskAssignmentService } from './assignment/task-assignment.service';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { Role } from '../auth/enums/role.enum';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+  ApiParam,
+} from '@nestjs/swagger';
 
-interface AuthenticatedRequest extends Request {
-  user?: {
-    sub?: string;
-    userId?: string;
-    id?: string;
-  };
-}
-
+@ApiTags('tasks')
 @Controller('tasks')
-@UseGuards(JwtAuthGuard)
 export class TasksController {
-  constructor(
-    private readonly taskAssignmentService: TaskAssignmentService,
-  ) {}
+  constructor(private readonly tasksService: TasksService) {}
 
-  @Get('today')
-  async getTodayTasks(@Req() req: AuthenticatedRequest): Promise<HealthTask[]> {
-    const userId = req.user?.sub ?? req.user?.userId ?? req.user?.id;
+  @Post()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.HEALER)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Create a new health task (ADMIN or HEALER only)' })
+  @ApiResponse({ status: 201, description: 'Task created successfully' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  create(@Body() createTaskDto: CreateTaskDto, @Request() req) {
+    return this.tasksService.create(createTaskDto, req.user.userId);
+  }
 
-    if (!userId) {
-      throw new UnauthorizedException('User not found in request context');
-    }
+  @Get()
+  @ApiOperation({ summary: 'Get all active health tasks (public)' })
+  @ApiResponse({ status: 200, description: 'Returns list of active tasks' })
+  findAll(@Query() listTasksDto: ListTasksDto) {
+    return this.tasksService.findAll(listTasksDto);
+  }
 
-    return this.taskAssignmentService.getTodayTasksForUser(userId);
+  @Get(':id')
+  @ApiOperation({ summary: 'Get a specific health task by ID (public)' })
+  @ApiParam({ name: 'id', description: 'Task ID' })
+  @ApiResponse({ status: 200, description: 'Returns the task' })
+  @ApiResponse({ status: 404, description: 'Task not found' })
+  findOne(@Param('id') id: string) {
+    return this.tasksService.findOne(+id);
+  }
+
+  @Patch(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.HEALER)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update a health task (owner or ADMIN)' })
+  @ApiParam({ name: 'id', description: 'Task ID' })
+  @ApiResponse({ status: 200, description: 'Task updated successfully' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Task not found' })
+  update(
+    @Param('id') id: string,
+    @Body() updateTaskDto: UpdateTaskDto,
+    @Request() req,
+  ) {
+    return this.tasksService.update(+id, updateTaskDto, req.user.userId, req.user.role);
+  }
+
+  @Delete(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Soft delete a health task (ADMIN only)' })
+  @ApiParam({ name: 'id', description: 'Task ID' })
+  @ApiResponse({ status: 200, description: 'Task archived successfully' })
+  @ApiResponse({ status: 403, description: 'Forbidden' })
+  @ApiResponse({ status: 404, description: 'Task not found' })
+  async remove(@Param('id') id: string) {
+    await this.tasksService.remove(+id);
+    return { message: 'Task archived successfully' };
   }
 }
